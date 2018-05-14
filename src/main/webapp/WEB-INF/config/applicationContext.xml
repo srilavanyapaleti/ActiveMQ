@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:jee="http://www.springframework.org/schema/jee" xmlns:jms="http://www.springframework.org/schema/jms"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans
+							http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+							http://www.springframework.org/schema/beans
+							http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+							http://www.springframework.org/schema/jee
+						    http://www.springframework.org/schema/jee/spring-jee-3.0.xsd
+                            http://www.springframework.org/schema/jms
+                            http://www.springframework.org/schema/jms/spring-jms.xsd">
+
+
+	<!-- Use Springs JNDI support to look up JMS Connection Factory and Queue definitions from the
+	     container. This means that specific connection details are not embedded in the application
+	 -->
+    <jee:jndi-lookup id="jmsConnectionFactory" jndi-name="jms/ConnectionFactory" proxy-interface="javax.jms.ConnectionFactory"/>
+	<jee:jndi-lookup id="synchronousQueue" jndi-name="java:comp/env/jms/synchronousQueue" />
+	<jee:jndi-lookup id="asynchronousQueue" jndi-name="java:comp/env/jms/asynchronousQueue" />
+    <jee:jndi-lookup id="processedQueue" jndi-name="java:comp/env/jms/processedQueue" />
+    <jee:jndi-lookup id="threadedQueue" jndi-name="java:comp/env/jms/threadedQueue" />
+
+	<!-- Our message listener implementation that implements the JMS MessageListener interface and implements the
+		 onMessage method to process incoming messages
+	 -->
+	<bean id="synchronousMessageListenerService" class="org.activemq.services.SynchronousQueueMessageListenerService">
+    	<property name="testMessageSender" ref ="testMessageSender" />
+    </bean>
+
+    <bean id="asynchronousMessageListenerService" class="org.activemq.services.AsynchronousQueueMessageListenerService">
+        <property name="testMessageSender" ref ="testMessageSender" />
+    </bean>
+
+    <bean id="threadedQueueMessageListenerService" class="org.activemq.services.ThreadedQueueMessageListenerService">
+        <property name="testMessageSender" ref ="testMessageSender" />
+    </bean>
+
+
+    <!-- A bean resolver (to resolve the destination queues in the listener-container -->
+    <bean id="jmsDestResolver" class="org.springframework.jms.support.destination.BeanFactoryDestinationResolver"/>
+
+    <!--Synchronised Queue-->
+    <jms:listener-container connection-factory="jmsConnectionFactory" concurrency="1" acknowledge="transacted"
+                            destination-resolver="jmsDestResolver" error-handler="synchronousMessageListenerService">
+        <!--The listener classes go here-->
+        <jms:listener destination="synchronousQueue" ref="synchronousMessageListenerService"/>
+    </jms:listener-container>
+
+    <!--Asynchronous Queue with concurrent consumers set-->
+    <jms:listener-container connection-factory="jmsConnectionFactory" concurrency="2-5" acknowledge="transacted"
+                            destination-resolver="jmsDestResolver" error-handler="asynchronousMessageListenerService">
+        <!--The listener classes go here-->
+        <jms:listener destination="asynchronousQueue" ref="asynchronousMessageListenerService"/>
+    </jms:listener-container>
+
+    <!-- Queue processed via multiple threadst-->
+    <jms:listener-container connection-factory="jmsConnectionFactory" concurrency="1" acknowledge="transacted"
+                            destination-resolver="jmsDestResolver" task-executor="taskExecutor" error-handler="asynchronousMessageListenerService">
+        <!--The listener classes go here-->
+        <jms:listener destination="threadedQueue" ref="threadedQueueMessageListenerService"/>
+    </jms:listener-container>
+
+	<!-- MessageSender is a simple POJO that we supply with a JMSTemplate and
+    	 the Queue that we want to send messages to
+     -->
+	<bean id="testMessageSender" class="org.activemq.services.TestMessageSender">
+		<property name="jmsTemplate" ref="jmsTemplate"/>
+		<property name="testQueue" ref="processedQueue"/>
+	</bean>
+
+	<!-- JMSTemplate is a Spring template that allows us to communicate with
+		 a message broker via JMS. JMSTemplate takes care of boiler plate code such as exception handling
+		 and resource management such as connection pooling. This allows us concentrate on solving the 'business'
+		 problem. We supply the JMS template with the connection factory mentioned above
+     -->
+	<bean id="jmsTemplate" class="org.springframework.jms.core.JmsTemplate">
+		<property name="connectionFactory" ref="jmsConnectionFactory" />
+	</bean>
+
+    <bean id="taskExecutor" class="org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor">
+        <property name="corePoolSize" value="10" />
+        <property name="maxPoolSize" value="20" />
+    </bean>
+
+</beans>
